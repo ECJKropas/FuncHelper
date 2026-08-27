@@ -1,0 +1,15 @@
+# Python / virtualenv
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Internal project data (WorkBuddy memory, not source)
+.workbuddy/
+
+# Generated outputs
+fit_result.json
+fit_result.png
+
+# OS
+.DS_Store
