@@ -207,6 +207,15 @@ def _fmt(v):
     return f"{float(v):.6g}"
 
 
+def _fmt_x_minus(xi):
+    """把 'x - xi' 写成可读形式：xi>=0 时 'x-(xi)'，xi<0 时 'x+(|xi|)'，
+    避免出现 'x-(-2)' 这种减去负数的丑陋写法。"""
+    v = float(xi)
+    if v >= 0:
+        return f"x-({_fmt(v)})"
+    return f"x+({_fmt(-v)})"
+
+
 def build_piecewise_expr(local_points):
     """构造穿过 n 个点的连续分段线性函数表达式（折线段模式）。
 
@@ -215,6 +224,8 @@ def build_piecewise_expr(local_points):
     之后对每个内部节点 xi，用 (mi - m_{i-1}) * max(x - xi, 0)
     修正斜率；而 max(x - xi, 0) = (x - xi + |x - xi|) / 2。
 
+    系数一律取绝对值，符号作为前导 ' + ' / ' - '，避免出现 '(-5)*' 或
+    'x-(-2)' 这类减去负数的丑陋写法。
     返回 'f(x) =' 之后的表达式字符串（不含 'y =' 前缀）。
     """
     pts = [tuple(map(float, p)) for p in local_points]
@@ -241,19 +252,38 @@ def build_piecewise_expr(local_points):
         xj, yj = pts[i + 1]
         slopes.append((yj - yi) / (xj - xi))
 
-    terms = [_fmt(y0)]
+    # parts: (sign, body)，sign 取 '' / '+' / '-'
+    parts = []
+    if abs(float(y0)) > 1e-9:
+        parts.append(("", _fmt(y0)))
+
     if abs(slopes[0]) > 1e-12:
-        terms.append(f"({_fmt(slopes[0])})*(x-({_fmt(x0)}))")
+        body = f"{_fmt(abs(slopes[0]))}*({_fmt_x_minus(x0)})"
+        parts.append(("+" if slopes[0] >= 0 else "-", body))
 
     for i in range(1, n - 1):  # 内部节点
         delta = slopes[i] - slopes[i - 1]
         if abs(delta) > 1e-12:
             xi = pts[i][0]
-            terms.append(
-                f"({_fmt(delta)})*((x-({_fmt(xi)}))+abs(x-({_fmt(xi)})))/2"
+            body = (
+                f"{_fmt(abs(delta))}*(({_fmt_x_minus(xi)})"
+                f"+abs({_fmt_x_minus(xi)}))/2"
             )
+            parts.append(("+" if delta >= 0 else "-", body))
 
-    return " + ".join(terms)
+    if not parts:
+        return "0"
+
+    first_sign, first_body = parts[0]
+    if first_sign == "-":
+        segs = ["-" + first_body]
+    elif first_sign == "+":
+        segs = ["+" + first_body]
+    else:
+        segs = [first_body]
+    for sign, body in parts[1:]:
+        segs.append((" + " if sign == "+" else " - ") + body)
+    return "".join(segs)
 
 
 if __name__ == "__main__":
