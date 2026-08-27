@@ -216,6 +216,13 @@ def _fmt_x_minus(xi):
     return f"x+({_fmt(-v)})"
 
 
+def _fmt_factor(c):
+    """把数值 c 格式化为乘积因子：c 为 1 时省略（返回 ''），否则返回 'c*'。"""
+    if abs(float(c) - 1.0) < 1e-9:
+        return ""
+    return _fmt(c) + "*"
+
+
 def build_piecewise_expr(local_points):
     """构造穿过 n 个点的连续分段线性函数表达式（折线段模式）。
 
@@ -258,16 +265,18 @@ def build_piecewise_expr(local_points):
         parts.append(("", _fmt(y0)))
 
     if abs(slopes[0]) > 1e-12:
-        body = f"{_fmt(abs(slopes[0]))}*({_fmt_x_minus(x0)})"
+        body = f"{_fmt_factor(abs(slopes[0]))}({_fmt_x_minus(x0)})"
         parts.append(("+" if slopes[0] >= 0 else "-", body))
 
     for i in range(1, n - 1):  # 内部节点
         delta = slopes[i] - slopes[i - 1]
         if abs(delta) > 1e-12:
             xi = pts[i][0]
+            # 把 max(x-xi,0)=(x-xi+|x-xi|)/2 的 /2 折进前面的系数
+            coeff = abs(delta) / 2.0
             body = (
-                f"{_fmt(abs(delta))}*(({_fmt_x_minus(xi)})"
-                f"+abs({_fmt_x_minus(xi)}))/2"
+                f"{_fmt_factor(coeff)}(({_fmt_x_minus(xi)})"
+                f"+abs({_fmt_x_minus(xi)}))"
             )
             parts.append(("+" if delta >= 0 else "-", body))
 
@@ -277,9 +286,8 @@ def build_piecewise_expr(local_points):
     first_sign, first_body = parts[0]
     if first_sign == "-":
         segs = ["-" + first_body]
-    elif first_sign == "+":
-        segs = ["+" + first_body]
     else:
+        # 首项不加前导 '+'（可能是被省去零常数项后的斜率项）
         segs = [first_body]
     for sign, body in parts[1:]:
         segs.append((" + " if sign == "+" else " - ") + body)
