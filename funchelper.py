@@ -275,10 +275,21 @@ class FuncHelper:
             return
 
         expr = "y = " + expr_body
-        self._present_result(local, expr, summary, extra)
+        self._present_result(local, expr, summary, extra, expr_body)
 
-    def _present_result(self, local, expr, summary, extra):
+    def _present_result(self, local, expr, summary, extra, expr_body):
         n = len(local)
+        # 自验证：公式在每个标定点的【局部】x 处是否等于其【局部】y
+        verified = True
+        checks = []
+        for (lx, ly) in local:
+            try:
+                fv = eval(expr_body, {"abs": abs, "x": float(lx)})
+                ok = abs(fv - float(ly)) < 1e-6
+            except Exception:  # noqa: BLE001
+                ok = False
+            verified = verified and ok
+            checks.append(ok)
 
         # ---- 保存数据（JSON，非绘图）----
         data = {
@@ -290,6 +301,7 @@ class FuncHelper:
             "points_screen": [list(p) for p in self.points_screen],
             "points_local": [list(map(float, p)) for p in local],
             "expr": expr,
+            "passes_through": verified,
         }
         data.update(extra)
         json_path = os.path.join(PROJECT_DIR, "fit_result.json")
@@ -299,25 +311,35 @@ class FuncHelper:
         # ---- 控制台输出 ----
         print("=" * 60)
         print(f"采集点数 n = {n}，{summary}")
-        print("函数（局部坐标系）:")
+        print("函数（局部坐标系，x/y 为【您定义的坐标系】下的值，非屏幕像素）:")
         print("  " + expr)
         if self.mode == "poly":
             print("系数（升幂 a0 + a1 x + ...）:")
             print("  " + ", ".join(f"{c:.6g}" for c in extra["coeffs_ascending"]))
-        print("采集点（局部坐标）:")
-        for p in local:
-            print(f"  ({p[0]:.4f}, {p[1]:.4f})")
+        print("采集点（局部坐标）与公式核对（应全部吻合）:")
+        for p, ok in zip(local, checks):
+            fv = eval(expr_body, {"abs": abs, "x": float(p[0])})
+            print(f"  ({p[0]:.4f}, {p[1]:.4f}) -> f={fv:.4f} {'OK' if ok else 'FAIL'}")
+        print(f"穿过全部标定点: {'是 ✓' if verified else '否 ✗'}")
         print(f"数据已保存: {json_path}")
         print("=" * 60)
 
         # ---- 从悬浮球右侧伸出横条显示函数字符串 ----
-        self._show_result_bar(expr)
-        self._set_hint("已生成函数，横条显示在球右侧（点击复制 · 右键关闭）")
+        status = (
+            f"✓ 已穿过 {n} 个标定点（局部坐标系）"
+            if verified
+            else f"⚠ 未能穿过全部 {n} 个标定点"
+        )
+        self._show_result_bar(expr, status)
+        self._set_hint(
+            "提示：公式的 x/y 是您标定的坐标系下的值，不是屏幕像素。"
+            "逐点核对见控制台/ fit_result.json"
+        )
 
     # ------------------------------------------------------------------ #
     # 结果横条（从悬浮球右侧伸出）
     # ------------------------------------------------------------------ #
-    def _show_result_bar(self, expr: str):
+    def _show_result_bar(self, expr: str, status: str = ""):
         self._close_result_bar()
         multiline = fm.multiline_expr(expr)
         bar = tk.Toplevel(self.root)
@@ -326,6 +348,11 @@ class FuncHelper:
         bar.configure(bg="#111418")
         frame = tk.Frame(bar, bg="#111418")
         frame.pack(padx=2, pady=4)
+        if status:
+            tk.Label(
+                frame, text=status, bg="#111418", fg="#7CFF9B",
+                font=("Arial", 9, "bold"), anchor="w",
+            ).pack(side="top", padx=(8, 6), pady=(0, 2), anchor="w")
         tk.Label(
             frame, text=multiline, bg="#111418", fg="#7fd1ff",
             font=("Menlo", 12), justify="left", anchor="w",
