@@ -319,6 +319,7 @@ class FuncHelper:
     # ------------------------------------------------------------------ #
     def _show_result_bar(self, expr: str):
         self._close_result_bar()
+        multiline = fm.multiline_expr(expr)
         bar = tk.Toplevel(self.root)
         bar.overrideredirect(True)
         bar.attributes("-topmost", True)
@@ -326,13 +327,14 @@ class FuncHelper:
         frame = tk.Frame(bar, bg="#111418")
         frame.pack(padx=2, pady=4)
         tk.Label(
-            frame, text=expr, bg="#111418", fg="#7fd1ff",
-            font=("Menlo", 12), justify="left",
-        ).pack(side="left", padx=(8, 6))
+            frame, text=multiline, bg="#111418", fg="#7fd1ff",
+            font=("Menlo", 12), justify="left", anchor="w",
+            wraplength=360,  # 单项过长时再自动折行
+        ).pack(side="top", padx=(8, 6), anchor="w")
         tk.Label(
             frame, text="点击复制 · 右键关闭", bg="#111418", fg="#6b7785",
-            font=("Arial", 9),
-        ).pack(side="left", padx=(0, 8))
+            font=("Arial", 9), anchor="w",
+        ).pack(side="top", padx=(8, 6), pady=(2, 0), anchor="w")
         bar.bind("<Button-1>", lambda e: self._copy_expr(expr))
         bar.bind("<Button-3>", lambda e: self._close_result_bar())
         self.result_bar = bar

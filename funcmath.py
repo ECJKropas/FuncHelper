@@ -13,6 +13,8 @@ FuncHelper —— 核心数学模块（不依赖 GUI / tkinter）
 
 from __future__ import annotations
 
+import re
+
 import numpy as np
 
 # 退化判定用的容差
@@ -173,6 +175,31 @@ def poly_to_str(coeffs, var: str = "x"):
         segs.append(seg)
         first = False
     return " ".join(segs) if segs else "0"
+
+
+def multiline_expr(expr: str):
+    """把单行表达式按加/减项拆成多行，便于悬浮球横条显示。
+
+    例如 ' -0.5x^3 + 3x^2 - 2x + 1 ' 变成：
+        -0.5x^3
+         + 3x^2
+         - 2x
+         + 1
+    折线段模式同理，每个 '+' 分隔的项各占一行。
+    """
+    # 按 ' + ' / ' - '（两侧带空格的运算符）切分并保留运算符
+    parts = re.split(r"( [+-] )", expr)
+    lines = []
+    pending_op = ""
+    for p in parts:
+        if p == "":
+            continue
+        if re.fullmatch(r" [+-] ", p):  # 运算符，挂到下一行开头
+            pending_op = p
+            continue
+        lines.append(pending_op + p)
+        pending_op = ""
+    return "\n".join(lines)
 
 
 def _fmt(v):
