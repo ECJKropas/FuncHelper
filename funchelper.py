@@ -288,9 +288,17 @@ class FuncHelper:
                 for p in self.points_screen
             ]
             if self.mode == "piecewise":
-                expr_body = fm.build_piecewise_expr(local)
-                summary = "折线段模式（连续分段线性）"
-                extra = {}
+                # 精确分数版：先把坐标有理数化（.5 等可精确表示），
+                # 再基于这些有理数化坐标构造、显示与验证，保证三者一致。
+                local_rat = fm.rationalize_points(local)
+                expr_body = fm.build_piecewise_expr_exact(local_rat)
+                summary = "折线段模式（精确分数，连续分段线性）"
+                extra = {
+                    "points_local_rationalized": [
+                        [float(a), float(b)] for a, b in local_rat
+                    ],
+                }
+                verify_pts = [(float(a), float(b)) for a, b in local_rat]
             else:
                 coeffs = fm.fit_polynomial(local)
                 expr_body = fm.poly_to_str(coeffs)
@@ -299,13 +307,14 @@ class FuncHelper:
                     "coeffs_ascending": [float(c) for c in coeffs],
                     "degree": len(coeffs) - 1,
                 }
+                verify_pts = local
         except Exception as exc:  # noqa: BLE001
             messagebox.showerror("计算错误", str(exc))
             self._set_hint(self._idle_hint_text())
             return
 
         expr = "y = " + expr_body
-        self._present_result(local, expr, summary, extra, expr_body)
+        self._present_result(verify_pts, expr, summary, extra, expr_body)
 
     def _present_result(self, local, expr, summary, extra, expr_body):
         n = len(local)

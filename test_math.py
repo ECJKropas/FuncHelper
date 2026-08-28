@@ -153,6 +153,38 @@ def test_piecewise_large_coords_precision():
             assert abs(val - y) < 1e-6, f"x={x}: 期望 {y}，得到 {val}\nexpr={expr}"
 
 
+def test_build_piecewise_exact_through_points():
+    # 精确分数版应穿过「有理数化后」的各点，且表达式可被 Python eval 直接验证。
+    cases = [
+        [(0.0, 18.0), (3.0, 21.0), (9.0, 27.0), (12.0, 39.0)],
+        [(-2.0, 1.0), (0.0, 3.0), (1.0, 0.0)],
+        [(0.0, 1.0), (2.0, 5.0)],          # 直线，无 abs 项
+        [(2.4, 3.8), (5.1, 1.2), (7.9, 9.3)],  # 非 .5 坐标，会被有理数化
+    ]
+    for pts in cases:
+        local_rat = fm.rationalize_points(pts)
+        expr = fm.build_piecewise_expr_exact(local_rat)
+        env = {"__builtins__": {}, "abs": abs}
+        for x, y in local_rat:
+            val = eval(expr, env, {"x": float(x)})  # noqa: S307 (受控测试输入)
+            assert abs(val - y) < 1e-6, f"expr={expr} x={x}: 期望 {y}，得到 {val}"
+
+
+def test_build_piecewise_exact_format():
+    # 目标布局：常数 + a*x  +  Σ c*abs(x-d)；且 d=0 简化为 abs(x)
+    assert fm.build_piecewise_expr_exact([(2.0, 7.0)]) == "7"
+    assert fm.build_piecewise_expr_exact([(0.0, 1.0), (2.0, 5.0)]) == "1 + 2*x"
+    s = fm.build_piecewise_expr_exact([(-2.0, 1.0), (0.0, 3.0), (1.0, 0.0)])
+    assert s == "3 - x - 2*abs(x)", s  # 节点 0 -> abs(x)，不是 abs(x-0)
+    s2 = fm.build_piecewise_expr_exact(
+        [(0.0, 18.0), (3.0, 21.0), (9.0, 27.0), (12.0, 39.0)]
+    )
+    assert s2 == "9/2 + 5/2*x + 3/2*abs(x-9)", s2
+    # 常数与 x 项应出现在第一个 abs 项之前（若有的话）
+    if "abs(" in s2:
+        assert s2.index("x") < s2.index("abs("), s2
+
+
 def main():
     tests = [
         test_basis_and_inverse,
@@ -167,6 +199,8 @@ def main():
         test_piecewise_duplicate_x_rejected,
         test_piecewise_large_coords_precision,
         test_poly_display_string_not_evalable_but_poly_eval_passes,
+        test_build_piecewise_exact_through_points,
+        test_build_piecewise_exact_format,
     ]
     for t in tests:
         t()

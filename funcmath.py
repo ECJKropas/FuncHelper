@@ -299,6 +299,151 @@ def build_piecewise_expr(local_points):
     return "".join(segs)
 
 
+def _to_rational(v, max_denom=1000):
+    """float -> sympy.Rational。
+
+    限制分母上限（默认 1000），既保证 .5 等能被精确表示为分数，
+    又避免 0.1 这类数被展开成 3602879701896397/36028797018963968 这种巨分数。
+    """
+    from fractions import Fraction
+
+    import sympy as sp
+
+    f = Fraction(float(v)).limit_denominator(max_denom)
+    return sp.Rational(f.numerator, f.denominator)
+
+
+def _fmt_rat_str(r):
+    """sympy.Rational -> 字符串：整数去分母（'9'），否则 'a/b'。"""
+    num = int(r.p)
+    den = int(r.q)
+    if den == 1:
+        return str(num)
+    return f"{num}/{den}"
+
+
+def _fmt_x_abs(d):
+    """abs 内部的可读写法：d=0 -> '(x)'，d>0 -> '(x-d)'，d<0 -> '(x+|d|)'，
+    避免 'x-(-2)' 以及多余的 'x-0'。"""
+    if d == 0:
+        return "(x)"
+    if d > 0:
+        return f"(x-{_fmt_rat_str(d)})"
+    return f"(x+{_fmt_rat_str(-d)})"
+
+
+def rationalize_points(local_points, max_denom=1000):
+    """把局部坐标（float）转为有限小数坐标（分数化后转回 float）。
+
+    供折线段精确分数模式使用：保证「显示的表达式」与「验证所用的点」一致，
+    且 .5 这类值能精确表示为 1/2。
+    """
+    from fractions import Fraction
+
+    out = []
+    for (x, y) in local_points:
+        fx = Fraction(float(x)).limit_denominator(max_denom)
+        fy = Fraction(float(y)).limit_denominator(max_denom)
+        out.append((fx.numerator / fx.denominator, fy.numerator / fy.denominator))
+    return out
+
+
+def build_piecewise_expr_exact(local_points):
+    """折线段模式（精确有理数版，sympy 实现）。
+
+    把 n 个局部点插值成连续分段线性函数，并把它**重排合并**成如下形式：
+
+        常数 + a*x  +  Σ  c_i * abs(x - d_i)
+
+    其中所有系数 / 节点均为分数（sympy.Rational）。例如：
+
+        18 + 5/7*x + 12/7*abs(x-9) + abs(x-3)
+
+    等价推导（与 build_piecewise_expr 完全相同，只是用符号有理数重排）：
+      - 基础项：y0 + m0*(x - x0)
+      - 每个内部节点 xi 用 ki * ( (x - xi) + abs(x - xi) ) 修正斜率，
+        ki = (mi - m_{i-1}) / 2，而 max(x-xi, 0) = (x-xi + |x-xi|)/2
+    展开后把线性部分合并进 a*x + b，abs 部分保留为 c*abs(x-d)。
+
+    说明：本函数只接受「局部坐标系」下的点（x 互异），不对屏幕坐标求值。
+    """
+    import sympy as sp
+
+    pts = [(float(p[0]), float(p[1])) for p in local_points]
+    n = len(pts)
+    if n < 1:
+        raise ValueError("至少需要 1 个采集点。")
+
+    pts.sort(key=lambda p: p[0])
+    xs = [p[0] for p in pts]
+    rounded = [round(x, 9) for x in xs]
+    if len(set(rounded)) != n:
+        raise ValueError(
+            "存在相同的 x 坐标，折线段模式无法构造（分段需要互异的 x）。"
+        )
+
+    # 单点 -> 常数
+    if n == 1:
+        return _fmt_rat_str(_to_rational(pts[0][1]))
+
+    x = sp.Symbol("x")
+    x0 = _to_rational(pts[0][0])
+    y0 = _to_rational(pts[0][1])
+    slopes = []
+    for i in range(n - 1):
+        xi, yi = pts[i]
+        xj, yj = pts[i + 1]
+        xi_r, yi_r = _to_rational(xi), _to_rational(yi)
+        xj_r, yj_r = _to_rational(xj), _to_rational(yj)
+        slopes.append((yj_r - yi_r) / (xj_r - xi_r))
+
+    # 线性部分（不含 abs）：y0 + m0*(x-x0) + Σ ki*(x - xi)
+    a = sp.Rational(0)            # x 的系数
+    b = y0 - slopes[0] * x0       # 常数（先放 y0 - m0*x0）
+    a = a + slopes[0]
+    abs_terms = []                # (coeff, node)
+    for i in range(1, n - 1):     # 内部节点
+        xi_r = _to_rational(pts[i][0])
+        ki = (slopes[i] - slopes[i - 1]) / 2
+        a = a + ki
+        b = b - ki * xi_r
+        if ki != 0:
+            abs_terms.append((ki, xi_r))
+    abs_terms.sort(key=lambda t: t[1])  # 按节点 x 升序，输出更整齐
+
+    # 组装显示串：常数 -> x 项 -> abs 项；负号已并入 body
+    parts = []
+    if b != 0:
+        parts.append(("+", _fmt_rat_str(b)))
+    if a != 0:
+        if a == 1:
+            body = "x"
+        elif a == -1:
+            body = "-x"
+        else:
+            body = f"{_fmt_rat_str(a)}*x"
+        parts.append(("+", body))
+    for (ki, di) in abs_terms:
+        inside = _fmt_x_abs(di)
+        if ki == 1:
+            body = f"abs{inside}"
+        elif ki == -1:
+            body = f"-abs{inside}"
+        else:
+            body = f"{_fmt_rat_str(ki)}*abs{inside}"
+        parts.append(("+", body))
+
+    if not parts:
+        return "0"
+    segs = [parts[0][1]]  # 首项直接取（已含符号）
+    for _sign, body in parts[1:]:
+        if body.startswith("-"):
+            segs.append(" - " + body[1:])
+        else:
+            segs.append(" + " + body)
+    return "".join(segs)
+
+
 if __name__ == "__main__":
     # 简单自检
     O, ex, ey = compute_basis([100, 100], [200, 100], [100, 50])
