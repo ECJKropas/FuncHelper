@@ -46,6 +46,7 @@ class FuncHelper:
 
         self.state = "IDLE"  # IDLE / GET_ORIGIN / GET_X / GET_Y / COLLECT
         self.mode = "poly"    # "poly"(多项式模式) / "piecewise"(折线段模式)
+        self._alt_down = False  # 是否按住 Option/Alt（采集时吸附到 .5）
         # 标定点
         self.O = None
         self.Px = None
@@ -113,6 +114,9 @@ class FuncHelper:
         self.overlay.bind("<Button-2>", lambda e: self.cancel())
         self.overlay.withdraw()
 
+        # 追踪 Option/Alt 状态（见 _bind_alt_tracking 说明）
+        self._bind_alt_tracking()
+
         self.root.mainloop()
 
     # ------------------------------------------------------------------ #
@@ -131,6 +135,39 @@ class FuncHelper:
 
     def _set_ball(self, text: str):
         self.canvas.itemconfig(self.text_id, text=text)
+
+    def _bind_alt_tracking(self):
+        """追踪 Option/Alt 键状态（按下=True，松开=False）。
+
+        重要：macOS 上 Tk 的鼠标按键事件 event.state **不会**包含 Option 修饰位
+        （Tk 在 Quartz 后端的已知问题），所以之前用 `event.state & 0x8` 检测 Option
+        永远为 0、吸附失效。这里改为用键盘事件单独维护 self._alt_down 标志。
+        """
+        def on_down(_e):
+            self._alt_down = True
+
+        def on_up(_e):
+            self._alt_down = False
+
+        for w in (self.root, self.overlay, self.ball):
+            for dn in ("<KeyPress-Alt_L>", "<KeyPress-Alt_R>",
+                       "<KeyPress-Meta_L>", "<KeyPress-Meta_R>"):
+                w.bind(dn, on_down)
+            for up in ("<KeyRelease-Alt_L>", "<KeyRelease-Alt_R>",
+                       "<KeyRelease-Meta_L>", "<KeyRelease-Meta_R>"):
+                w.bind(up, on_up)
+        # 捕获层失去焦点时复位，避免卡在 True
+        self.overlay.bind(
+            "<FocusOut>", lambda _e: setattr(self, "_alt_down", False)
+        )
+
+    def _arm_alt_focus(self):
+        """进入采集模式时把键盘焦点交给捕获层，使 Option 键事件能被捕获。"""
+        self._alt_down = False
+        try:
+            self.overlay.focus_set()
+        except Exception:  # noqa: BLE001
+            pass
 
     # ------------------------------------------------------------------ #
     # 模式（多项式 / 折线段）
@@ -228,26 +265,29 @@ class FuncHelper:
             self.ey = self.Py - self.O
             self.state = "COLLECT"
             self.points_screen = []
+            self._arm_alt_focus()  # 让 Option 键事件可被捕获
             self._set_ball("结束")
-            self._set_hint("点击数据点；全部完成后点悬浮球「结束」")
+            self._set_hint("点击数据点；按住 Option 吸附到 .5；完成后点悬浮球「结束」")
         elif self.state == "COLLECT":
             lx, ly = fm.screen_to_local((x, y), self.O, self.ex, self.ey)
-            # 按住 Alt / Option 键：把局部坐标吸附到最近的 .5
+            # 按住 Option / Alt 键：把局部坐标吸附到最近的 .5
             # （例如 (2.4, 3.8) -> (2.5, 4.0)），使表达式既干净又精确
-            if event.state & 0x8:  # 0x8 = MOD1 = Alt / Option (macOS)
+            alt = self._alt_down or bool(event.state & 0x8)
+            if alt:
                 lx = round(lx * 2) / 2.0
                 ly = round(ly * 2) / 2.0
             # 把（可能已吸附的）局部坐标还原回屏幕坐标存储，
             # _finish 会再次转回局部坐标，因此与采集时一致。
             sx, sy = fm.local_to_screen((float(lx), float(ly)), self.O, self.ex, self.ey)
             self.points_screen.append((float(sx), float(sy)))
+            tag = "（已吸附 .5）" if alt else "（按住 Option 吸附到 .5）"
             self._set_hint(
-                f"已采集 {len(self.points_screen)} 个点"
-                f"（按住 Alt 吸附到 .5）；完成后点悬浮球「结束」"
+                f"已采集 {len(self.points_screen)} 个点{tag}；完成后点悬浮球「结束」"
             )
 
     def cancel(self):
         self.state = "IDLE"
+        self._alt_down = False
         self._hide_overlay()
         self._set_ball("开始")
         self._set_hint(self._idle_hint_text())
@@ -258,6 +298,7 @@ class FuncHelper:
     def _finish(self):
         self._hide_overlay()
         self.state = "IDLE"
+        self._alt_down = False
         self._set_ball("开始")
 
         if len(self.points_screen) < 1:
