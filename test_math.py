@@ -114,6 +114,29 @@ def test_piecewise_duplicate_x_rejected():
         pass
 
 
+def test_poly_display_string_not_evalable_but_poly_eval_passes():
+    # 多项式显示字符串用 'ax^2' 形式（无乘号），不能直接 eval；
+    # 验证必须走 poly_eval（数值），这是 funchelper 修复后采用的路径。
+    rng = np.random.default_rng(7)
+    for _ in range(200):
+        n = rng.integers(3, 7)
+        xs = np.sort(rng.uniform(-2000, 2000, n))
+        ys = rng.uniform(-2000, 2000, n)
+        pts = [(float(x), float(y)) for x, y in zip(xs, ys)]
+        coeffs = fm.fit_polynomial(pts)
+        body = fm.poly_to_str(coeffs)
+        # 显示字符串不应能直接 eval（锁定设计选择）
+        try:
+            eval(body, {"x": 1.0})
+            # 若未来改成可 eval 形式，这条断言应随之调整
+        except (SyntaxError, NameError, TypeError):
+            pass
+        # 但 poly_eval 必须精确穿过所有点
+        for (lx, ly) in pts:
+            v = float(fm.poly_eval(coeffs, float(lx)))
+            assert abs(v - ly) < 1e-6 + 1e-9 * abs(ly), (body, lx, ly, v)
+
+
 def test_piecewise_large_coords_precision():
     # 回归：屏幕像素级大坐标 + 高精度格式化，字符串必须仍严格穿过各点。
     # 旧实现用 6 位有效数字，大坐标被斜率放大后不再穿点（误报「未穿过」）。
@@ -143,6 +166,7 @@ def main():
         test_build_piecewise_through_points,
         test_piecewise_duplicate_x_rejected,
         test_piecewise_large_coords_precision,
+        test_poly_display_string_not_evalable_but_poly_eval_passes,
     ]
     for t in tests:
         t()

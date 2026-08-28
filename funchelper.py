@@ -292,17 +292,26 @@ class FuncHelper:
 
     def _present_result(self, local, expr, summary, extra, expr_body):
         n = len(local)
-        # 自验证：公式在每个标定点的【局部】x 处是否等于其【局部】y
+        # 数值方式验证（不是 eval 表达式字符串）：
+        # 多项式模式用 poly_eval(coeffs, x)，折线段模式用 eval（其字符串含 * 可求值）。
+        # 注意：poly_to_str 的显示字符串 "ax^2" 没有乘号，不能直接 eval。
+        coeffs = extra.get("coeffs_ascending")
         verified = True
         checks = []
+        fvals = []
         for (lx, ly) in local:
             try:
-                fv = eval(expr_body, {"abs": abs, "x": float(lx)})
+                if coeffs is not None:
+                    fv = float(fm.poly_eval(coeffs, float(lx)))
+                else:
+                    fv = float(eval(expr_body, {"abs": abs, "x": float(lx)}))
                 ok = abs(fv - float(ly)) < 1e-6 + 1e-9 * abs(float(ly))
             except Exception:  # noqa: BLE001
+                fv = float("nan")
                 ok = False
             verified = verified and ok
             checks.append(ok)
+            fvals.append(fv)
 
         # ---- 保存数据（JSON，非绘图）----
         data = {
@@ -330,9 +339,9 @@ class FuncHelper:
             print("系数（升幂 a0 + a1 x + ...）:")
             print("  " + ", ".join(f"{c:.6g}" for c in extra["coeffs_ascending"]))
         print("采集点（局部坐标）与公式核对（应全部吻合）:")
-        for p, ok in zip(local, checks):
-            fv = eval(expr_body, {"abs": abs, "x": float(p[0])})
-            print(f"  ({p[0]:.4f}, {p[1]:.4f}) -> f={fv:.4f} {'OK' if ok else 'FAIL'}")
+        for p, ok, fv in zip(local, checks, fvals):
+            fv_str = f"{fv:.4f}" if fv == fv else "ERR"
+            print(f"  ({p[0]:.4f}, {p[1]:.4f}) -> f={fv_str} {'OK' if ok else 'FAIL'}")
         print(f"穿过全部标定点: {'是 ✓' if verified else '否 ✗'}")
         print(f"数据已保存: {json_path}")
         print("=" * 60)
