@@ -114,6 +114,22 @@ def test_piecewise_duplicate_x_rejected():
         pass
 
 
+def test_piecewise_large_coords_precision():
+    # 回归：屏幕像素级大坐标 + 高精度格式化，字符串必须仍严格穿过各点。
+    # 旧实现用 6 位有效数字，大坐标被斜率放大后不再穿点（误报「未穿过」）。
+    rng = np.random.default_rng(42)
+    for _ in range(50):
+        n = int(rng.integers(2, 6))
+        xs = np.sort(rng.uniform(-2000, 2000, n))
+        ys = rng.uniform(-2000, 2000, n)
+        pts = [(float(x), float(y)) for x, y in zip(xs, ys)]
+        expr = fm.build_piecewise_expr(pts)
+        env = {"__builtins__": {}, "abs": abs}
+        for x, y in pts:
+            val = eval(expr, env, {"x": x})  # noqa: S307 (受控测试输入)
+            assert abs(val - y) < 1e-6, f"x={x}: 期望 {y}，得到 {val}\nexpr={expr}"
+
+
 def main():
     tests = [
         test_basis_and_inverse,
@@ -126,6 +142,7 @@ def main():
         test_poly_to_str,
         test_build_piecewise_through_points,
         test_piecewise_duplicate_x_rejected,
+        test_piecewise_large_coords_precision,
     ]
     for t in tests:
         t()

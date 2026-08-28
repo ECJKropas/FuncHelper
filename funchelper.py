@@ -139,7 +139,10 @@ class FuncHelper:
 
     def _idle_hint_text(self):
         other = "折线段模式" if self.mode == "poly" else "多项式模式"
-        return f"点击悬浮球开始（当前: {self.MODE_NAMES[self.mode]}，右键切换为{other}）"
+        return (
+            f"点击悬浮球开始（当前: {self.MODE_NAMES[self.mode]}，右键切换为{other}）"
+            f"｜采集点时可按住 Alt 吸附到 .5"
+        )
 
     def _toggle_mode(self):
         self.mode = "piecewise" if self.mode == "poly" else "poly"
@@ -228,9 +231,19 @@ class FuncHelper:
             self._set_ball("结束")
             self._set_hint("点击数据点；全部完成后点悬浮球「结束」")
         elif self.state == "COLLECT":
-            self.points_screen.append((float(x), float(y)))
+            lx, ly = fm.screen_to_local((x, y), self.O, self.ex, self.ey)
+            # 按住 Alt / Option 键：把局部坐标吸附到最近的 .5
+            # （例如 (2.4, 3.8) -> (2.5, 4.0)），使表达式既干净又精确
+            if event.state & 0x8:  # 0x8 = MOD1 = Alt / Option (macOS)
+                lx = round(lx * 2) / 2.0
+                ly = round(ly * 2) / 2.0
+            # 把（可能已吸附的）局部坐标还原回屏幕坐标存储，
+            # _finish 会再次转回局部坐标，因此与采集时一致。
+            sx, sy = fm.local_to_screen((float(lx), float(ly)), self.O, self.ex, self.ey)
+            self.points_screen.append((float(sx), float(sy)))
             self._set_hint(
-                f"已采集 {len(self.points_screen)} 个点；完成后点悬浮球「结束」"
+                f"已采集 {len(self.points_screen)} 个点"
+                f"（按住 Alt 吸附到 .5）；完成后点悬浮球「结束」"
             )
 
     def cancel(self):
@@ -285,7 +298,7 @@ class FuncHelper:
         for (lx, ly) in local:
             try:
                 fv = eval(expr_body, {"abs": abs, "x": float(lx)})
-                ok = abs(fv - float(ly)) < 1e-6
+                ok = abs(fv - float(ly)) < 1e-6 + 1e-9 * abs(float(ly))
             except Exception:  # noqa: BLE001
                 ok = False
             verified = verified and ok
